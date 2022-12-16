@@ -1,0 +1,268 @@
+package listner;
+
+import com.aventstack.extentreports.ExtentReports;
+import com.aventstack.extentreports.ExtentTest;
+import com.aventstack.extentreports.MediaEntityModelProvider;
+import com.aventstack.extentreports.Status;
+import com.aventstack.extentreports.markuputils.ExtentColor;
+import com.aventstack.extentreports.markuputils.MarkupHelper;
+import com.aventstack.extentreports.reporter.ExtentHtmlReporter;
+import com.aventstack.extentreports.reporter.configuration.Theme;
+import com.aventstack.extentreports.model.Log;
+import com.aventstack.extentreports.model.MediaType;
+import com.aventstack.extentreports.model.ScreenCapture;
+
+import constants.Constants;
+import init.DriverFactory;
+import utils.EncryptionDecryption;
+import utils.FileOperations;
+
+import java.io.File;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+import org.apache.commons.configuration.ConfigurationException;
+import org.apache.commons.io.FileUtils;
+import org.openqa.selenium.OutputType;
+import org.openqa.selenium.TakesScreenshot;
+import org.openqa.selenium.remote.RemoteWebDriver;
+import org.testng.IClassListener;
+import org.testng.ISuite;
+import org.testng.ISuiteListener;
+import org.testng.ITestClass;
+import org.testng.ITestContext;
+import org.testng.ITestListener;
+import org.testng.ITestResult;
+import org.testng.Reporter;
+import java.util.HashMap;
+import java.util.Map;
+
+public class ReportListener implements ITestListener, IClassListener, ISuiteListener {
+
+	Path currentRelativePath = Paths.get("");
+	String s = currentRelativePath.toAbsolutePath().toString();
+	String basePath = s + File.separator;
+
+	private ExtentReports extent;
+	private ExtentHtmlReporter htmlReporter;
+	private String extentScreen = null;
+	private static ScreenCapture med;
+	private static MediaEntityModelProvider mp;
+	private static ThreadLocal<Integer> testMethodCount = new ThreadLocal<Integer>();
+	// private ThreadLocal<String> testRunStatus = new ThreadLocal<String>();
+	String testRunStatus =null;
+	private static String filePathex = System.getProperty("user.dir") + "/Extent Reports/extentreport.html";
+	private static Map<String, RemoteWebDriver> driverMap = new HashMap<String, RemoteWebDriver>();
+	private static Map<String, ExtentTest> extentTestMap = new HashMap<String, ExtentTest>();
+
+	Constants constants = new Constants();
+	FileOperations fileOperations = new FileOperations();
+	EncryptionDecryption encryptionDecryptionObj = new EncryptionDecryption();
+
+	public synchronized ExtentTest startTest(String testName) {
+		ExtentTest classNode = getExtent().createTest(testName);
+		extentTestMap.put(testName, classNode);
+		return classNode;
+	}
+
+	public static synchronized ExtentTest getTest(String testName) {
+		return extentTestMap.get(testName);
+	}
+
+	public void onStart(ISuite suite) {
+		this.extent = getExtent();
+		suite.setAttribute("extent", this.extent);
+		Path currentRelativePath = Paths.get("");
+		String s = currentRelativePath.toAbsolutePath().toString();
+		FileOperations fileOperations = new FileOperations();
+		String testDownloadedItems=System.getProperty("user.dir")+File.separator +"testDownloadedItems"+File.separator;
+		try {
+			FileUtils.cleanDirectory(new File(testDownloadedItems));
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		fileOperations.cleanDir(s + File.separator + "Zipped Report/");  
+		fileOperations.cleanDir(s + File.separator + "Extent Reports/Failure Screenshots/");  // selenium+8
+		fileOperations.cleanDir(s + File.separator + "Extent Reports/Passed Screenshots/");   // selenium+8
+		fileOperations.cleanDir(s + File.separator + "Extent Reports/Skipped Screenshots/");  // selenium+8
+		testRunStatus ="pass";
+	}
+
+	public void onStart(ITestContext context) {
+	}
+
+	public void onBeforeClass(ITestClass testclass) {
+		startTest(testclass.getRealClass().getSimpleName());
+		//System.out.println("listener before class");
+		testMethodCount.set(-1);
+	}
+
+	public void onTestStart(ITestResult result) {
+		String testClassName = result.getTestClass().getRealClass().getSimpleName();
+		System.out.println("Class Name: "+testClassName+" with instance id :"+DriverFactory.getDriver());
+		driverMap.put(testClassName, DriverFactory.getDriver());
+		getTest(result.getInstanceName().replace(".", " ").split(" ")[result.getInstanceName().replace(".", " ").split(" ").length-1].trim())
+		.createNode(result.getMethod().getMethodName(), result.getMethod().getDescription())
+		.log(Status.INFO, "Test Method " + result.getMethod().getMethodName() + " started.");
+
+		Integer testMethodCountValue = testMethodCount.get();
+		testMethodCountValue = testMethodCountValue + 1;
+		testMethodCount.set(testMethodCountValue);
+	}
+
+	public void onTestSuccess(ITestResult result) {
+
+		String methodName = result.getName().trim();
+		String filePath = System.getProperty("user.dir") + "/Extent Reports/Passed Screenshots/";
+		try {
+			takeScreenShot(filePath, methodName, driverMap.get(result.getTestClass().getRealClass().getSimpleName()));
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+		Log logObj = new Log(getTest(Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ")[Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ").length-1].trim()));
+		logObj.setDetails("Test Method " + result.getMethod().getMethodName() + " completed successfully.");
+		logObj.setStatus(Status.PASS);
+
+		getTest(Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ")[Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ").length-1].trim()) .getModel().getNodeContext().get(testMethodCount.get()).getLogContext().add(logObj);
+
+		med = new ScreenCapture();
+		med.setMediaType(MediaType.IMG);
+		med.setPath("Passed Screenshots/" + methodName + ".png");
+		getTest(Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ")[Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ").length-1].trim())
+		.getModel().getNodeContext().get(testMethodCount.get()).setScreenCapture(med);
+	}
+
+	public void onTestFailure(ITestResult result) {
+
+		testRunStatus ="fail";
+		String methodName = result.getName().trim();
+		String filePath = System.getProperty("user.dir") + "/Extent Reports/Failure Screenshots/";
+		takeScreenShot(filePath, methodName, driverMap.get(result.getTestClass().getRealClass().getSimpleName()));
+
+		Log logObj = new Log(getTest(Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ")[Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ").length-1].trim()));
+		logObj.setDetails("Test Method " + result.getMethod().getMethodName() + " failed due to Exception -----> " + Reporter.getCurrentTestResult().getThrowable().toString());
+		logObj.setStatus(Status.FAIL);
+
+		getTest(Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ")[Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ").length-1].trim()).getModel().getNodeContext().get(testMethodCount.get()).getLogContext().add(logObj);
+
+		med = new ScreenCapture();
+		med.setMediaType(MediaType.IMG);
+		med.setPath("Failure Screenshots/" + methodName + ".png");
+		getTest(Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ")[Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ").length-1].trim())
+		.getModel().getNodeContext().get(testMethodCount.get()).setScreenCapture(med);
+	}
+
+	public void onTestSkipped(ITestResult result) {
+		System.out.println("Skip class name: "+result.getTestClass().getRealClass().getSimpleName()+" with instance id :"+DriverFactory.getDriver());
+		testRunStatus = "fail";
+
+		String methodName = result.getName().trim();
+		try {
+			String h = String.valueOf(DriverFactory.getDriver().getSessionId());
+			if(!(h.isEmpty())) {
+				String filePath = System.getProperty("user.dir") + "Extent Reports/Skipped Screenshots/";
+				takeScreenShot(filePath, methodName, DriverFactory.getDriver());
+			}
+
+			med = new ScreenCapture();
+			med.setMediaType(MediaType.IMG);
+			med.setPath("Skipped Screenshots/" + methodName + ".png");
+			mp = new MediaEntityModelProvider(med);
+			getTest(Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ")[Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ").length-1].trim()).createNode(result.getMethod().getMethodName(), result.getMethod().getDescription())
+			.skip(MarkupHelper.createLabel("SKIP", ExtentColor.BLUE)).skip("Screenshot " + result.getMethod().getMethodName(), mp).log(Status.SKIP, "Test method " + result.getMethod().getMethodName() + " skip due to Exception -----> " + Reporter.getCurrentTestResult().getThrowable().toString());
+
+
+		} catch (Exception e) {
+			getTest(Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ")[Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ").length-1].trim()).createNode(result.getMethod().getMethodName(), result.getMethod().getDescription())
+			.skip(MarkupHelper.createLabel("SKIP", ExtentColor.BLUE)).skip("Screenshot " + result.getMethod().getMethodName()).log(Status.SKIP, "Test method " + result.getMethod().getMethodName() + " skip due to Exception -----> " + Reporter.getCurrentTestResult().getThrowable().toString());
+			Integer testMethodCountValue = testMethodCount.get();
+			testMethodCountValue = testMethodCountValue + 1;
+			testMethodCount.set(testMethodCountValue);
+		}
+
+	}
+
+	public void onTestFailedButWithinSuccessPercentage(ITestResult result) {
+	}
+
+	public void onAfterClass(ITestClass testclass) {
+	}
+
+	public void onFinish(ITestContext context) {
+	}
+
+	public void onFinish(ISuite suite) {
+		if(testRunStatus.equalsIgnoreCase("fail")) {
+			try {
+				fileOperations.updateValueToPropertyFile(constants.CONFIG_WEB_FILE_PATH, "testRunStatus", "fail");
+			} catch (ConfigurationException | IOException e) {
+				e.printStackTrace();
+			}
+		} else {
+			try {
+				fileOperations.updateValueToPropertyFile(constants.CONFIG_WEB_FILE_PATH, "testRunStatus", "pass");
+			} catch (ConfigurationException | IOException e) {
+				e.printStackTrace();
+			}
+		}
+		this.extent.flush();
+	}
+
+	public void takeScreenShot(String filePath, String methodName, RemoteWebDriver driver) {
+		try {
+			TakesScreenshot d = ((TakesScreenshot) driver);
+			File scrFile = d.getScreenshotAs(OutputType.FILE);
+			File scrFile2 = new File(filePath + methodName + ".png");
+			System.setProperty("org.uncommons.reportng.escape-output", "false");
+			FileUtils.copyFile(scrFile, scrFile2);
+			System.out.println("***Placed screen shot in " + filePath + "***");
+			extentScreen = scrFile2.toString();
+			Reporter.setEscapeHtml(false);
+			Reporter.log("<a href='"+scrFile2.toString()+"'><img src ='"+scrFile2.toString()+"' width='200' height='200'></a>");
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+	public ExtentReports getExtent() {
+		if (extent == null) {
+			extent = new ExtentReports();
+			String name="Veoci";
+			try {
+				name = InetAddress.getLocalHost().getHostName();
+			} catch (UnknownHostException e) {
+				e.printStackTrace();
+			}
+			extent.setSystemInfo("User Name", name);
+			extent.setSystemInfo("Browser", fileOperations.getValueFromPropertyFile(constants.CONFIG_WEB_FILE_PATH, "browserName"));
+			extent.setSystemInfo("Java Version", System.getProperty("java.version"));
+			extent.setSystemInfo("OS", System.getProperty("os.name", "generic").toLowerCase());
+			extent.setSystemInfo("Environment", "Stage");
+			extent.attachReporter(getHtmlReporter());
+		}
+		return extent;
+	}
+
+	private ExtentHtmlReporter getHtmlReporter() {
+		htmlReporter = new ExtentHtmlReporter(filePathex);
+		htmlReporter.config().setCSS(".r-img { width: 10%; }");
+		htmlReporter.config().setTheme(Theme.DARK);
+		htmlReporter.config().setDocumentTitle("Veoci Automation Report");
+		htmlReporter.config().setReportName("Test Automation Report");
+		return htmlReporter;
+	}
+
+	public static void logToReport(String msg) {
+		Log logObj = new Log(getTest(Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ")[Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ").length-1].trim()));
+		logObj.setDetails(msg);
+		logObj.setStatus(Status.INFO);
+		getTest(Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ")[Reporter.getCurrentTestResult().getInstanceName().replace(".", " ").split(" ").length-1].trim()).getModel().getNodeContext().get(testMethodCount.get()).getLogContext().add(logObj);
+		//logObj.setSequence(2);
+		//System.out.println(getTest(Reporter.getCurrentTestResult().getInstanceName().split("\\.")[2].trim()).getModel().getNodeContext().get(0).getLogContext().get(0).getDetails());
+	}
+}
